@@ -1,0 +1,23 @@
+using System.Text.Json;
+using CodexQuotaPet;
+var now=DateTimeOffset.Parse("2026-10-27T12:00:00+08:00");
+var passed=0;
+void Check(bool ok,string name){if(!ok)throw new Exception("FAIL: "+name);Console.WriteLine("PASS: "+name);passed++;}
+PetQuota Parse(string text)=>QuotaView.Parse(JsonDocument.Parse(text).RootElement,now);
+var data=Parse("""{"rateLimits":{"primary":{"usedPercent":90,"windowDurationMins":300}},"rateLimitsByLimitId":{"other":{"primary":{"usedPercent":99,"windowDurationMins":300}},"codex":{"primary":{"usedPercent":44,"windowDurationMins":300,"resetsAt":1793088000},"secondary":{"usedPercent":8,"windowDurationMins":10080}}}}""");
+Check(data.FiveHour?.Remaining==56 && data.Weekly?.Remaining==92,"codex pool wins over legacy and other pools");
+Check(data.Pool=="codex","pool identity retained");
+Check(!QuotaView.IsStale(data,now),"fresh sample");
+Check(QuotaView.IsStale(data,now.AddMinutes(3)),"stale sample");
+Check(QuotaView.IsStale(data with{FiveHour=new WindowQuota(10,now.AddSeconds(-1))},now),"reset passed invalidates old reading");
+Check(Parse("""{"rateLimitsByLimitId":{"a":{},"b":{}}}""").FiveHour is null,"ambiguous pools stay unknown");
+Check(Parse("""{"rateLimits":{"primary":{"usedPercent":5,"windowDurationMins":60},"secondary":{"usedPercent":50,"windowDurationMins":10080}}}""").FiveHour is null,"duration never inferred from primary");
+Check(Parse("""{"rateLimits":{"primary":{"usedPercent":110,"windowDurationMins":300}}}""").FiveHour?.Remaining==0,"percentage clamped");
+Check(Parse("{} ").FiveHour is null,"missing data stays unknown");
+Check(Parse("""{"rateLimits":{"primary":{"usedPercent":null,"windowDurationMins":300}}}""").FiveHour is null,"null percent stays unknown");
+Check(Parse("""{"rateLimits":{"primary":{"usedPercent":25,"windowDurationMins":null}}}""").FiveHour is null,"null duration stays unknown");
+Check(Parse("""{"rateLimits":{"primary":{"usedPercent":25,"windowDurationMins":300,"resetsAt":null}}}""").FiveHour is {Remaining:75,Reset:null},"null reset preserves available percent");
+Check(QuotaView.Beijing(DateTimeOffset.Parse("2026-10-27T00:00:00Z"))=="10月27日 08:00","Beijing independent of machine timezone");
+Check(QuotaView.Countdown(now.AddHours(2).AddMinutes(3),now)=="2小时03分","countdown");
+Check(QuotaView.Countdown(now.AddSeconds(-1),now)=="等待更新","elapsed reset never claims new quota");
+Console.WriteLine($"{passed} tests passed");
